@@ -1,0 +1,331 @@
+import { useEffect, useState, useCallback } from 'react';
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  pointerWithin,
+  rectIntersection,
+  type CollisionDetection,
+} from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
+import api from '../lib/axios';
+import { useTaskStore } from '../stores/taskStore';
+import { useAuthStore } from '../stores/authStore';
+import { Task, TaskStatus, Project, User } from '../types';
+import TaskCard from '../components/TaskCard';
+import KanbanColumn from '../components/KanbanColumn';
+import TaskModal from '../components/TaskModal';
+
+const COLUMNS: TaskStatus[] = ['To Do', 'In Progress', 'Code Review', 'Testing', 'Done'];
+const PRIVILEGED = ['Admin', 'Project Manager'];
+
+export default function KanbanPage() {
+  const { t } = useTranslation();
+  const { tasks, setTasks, moveTask, setLoading } = useTaskStore();
+  const currentUser = useAuthStore((s) => s.user);
+  const isPrivileged = PRIVILEGED.includes(currentUser?.role ?? '');
+
+  const [projects, setProjects]           = useState<Project[]>([]);
+  const [members, setMembers]             = useState<User[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>('');
+  const [selectedMember, setSelectedMember]   = useState<string>('');   // PM filter
+  const [activeTask, setActiveTask]       = useState<Task | null>(null);
+  const [showModal, setShowModal]         = useState(false);
+  const [editTask, setEditTask]           = useState<Task | undefined>();
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
+  );
+
+  // Pointer-first collision: detects the column the cursor is inside,
+  // falls back to rectangle intersection for edge cases (empty columns, fast moves).
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) return pointerCollisions;
+    return rectIntersection(args);
+  }, []);
+
+  // ── Fetch projects ──────────────────────────────────────────────────────────
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await api.get<{ data: { projects: Project[] } }>('/projects');
+      const p = res.data.data?.projects ?? [];
+      setProjects(p);
+      if (p.length > 0 && !selectedProject) setSelectedProject(p[0]._id);
+    } catch {
+      toast.error('Failed to load projects');
+    }
+  }, [selectedProject]);
+
+  // ── Fetch team members (for PM filter) ─────────────────────────────────────
+  const fetchMembers = useCallback(async () => {
+    if (!isPrivileged) return;
+    try {
+      const res = await api.get<{ data: { users: User[] } }>('/users');
+      setMembers(res.data.data?.users ?? []);
+    } catch {
+      // non-critical, ignore
+    }
+  }, [isPrivileged]);
+
+  // ── Fetch tasks ─────────────────────────────────────────────────────────────
+  const fetchTasks = useCallback(async () => {
+    if (!selectedProject) return;
+    setLoading(true);
+    try {
+      let url = `/tasks?projectId=${selectedProject}`;
+      if (isPrivileged && selectedMember) url += `&assigneeId=${selectedMember}`;
+      const res = await api.get<{ data: { tasks: Task[] } }>(url);
+      setTasks(res.data.data?.tasks ?? []);
+    } catch {
+      toast.error('Failed to load tasks');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedProject, selectedMember, isPrivileged, setTasks, setLoading]);
+
+  useEffect(() => { fetchProjects(); }, [fetchProjects]);
+  useEffect(() => { fetchMembers(); }, [fetchMembers]);
+  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+
+  // ── Board helpers ───────────────────────────────────────────────────────────
+  const getColumnTasks = (status: TaskStatus) =>
+    tasks.filter((t) => t.status === status).sort((a, b) => a.order - b.order);
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveTask(tasks.find((t) => t._id === event.active.id) ?? null);
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveTask(null);
+    if (!over) return;
+
+    const taskId  = active.id as string;
+    const overId  = over.id as string;
+    const newStatus = COLUMNS.includes(overId as TaskStatus)
+      ? (overId as TaskStatus)
+      : tasks.find((t) => t._id === overId)?.status;
+
+    if (!newStatus) return;
+    const currentTask = tasks.find((t) => t._id === taskId);
+    if (!currentTask || currentTask.status === newStatus) return;
+
+    const newOrder = getColumnTasks(newStatus).length;
+    moveTask(taskId, newStatus, newOrder);
+
+    try {
+      await api.patch(`/tasks/${taskId}/status`, { status: newStatus, order: newOrder });
+    } catch {
+      toast.error('Failed to update task status');
+      fetchTasks();
+    }
+  };
+
+  const openEdit = (task: Task) => { setEditTask(task); setShowModal(true); };
+
+  const handleDelete = async (task: Task) => {
+    if (!confirm(`Delete "${task.title}"?`)) return;
+    try {
+      await api.delete(`/tasks/${task._id}`);
+      toast.success('Task deleted');
+      fetchTasks();
+    } catch {
+      toast.error('Failed to delete task');
+    }
+  };
+
+  const openNewTask = () => { setEditTask(undefined); setShowModal(true); };
+
+  // ── Stats for PM header ─────────────────────────────────────────────────────
+  const totalTasks = tasks.length;
+  const doneTasks  = tasks.filter((t) => t.status === 'Done').length;
+  const inProgTasks = tasks.filter((t) => t.status === 'In Progress').length;
+
+  return (
+    <div className="h-full flex flex-col bg-surface-bg">
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="px-6 py-4 border-b border-gray-100 bg-white flex items-center justify-between flex-shrink-0">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">
+            {isPrivileged ? 'Project Board' : t('kanban.yourTasks')}
+          </h1>
+          <p className="text-sm text-gray-400 mt-0.5 font-medium">
+            {isPrivileged
+              ? 'Manage and monitor all team tasks'
+              : `Showing tasks assigned to you · ${totalTasks} task${totalTasks !== 1 ? 's' : ''}`}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* Project selector */}
+          <select
+            className="input w-44 text-sm"
+            value={selectedProject}
+            onChange={(e) => { setSelectedProject(e.target.value); setSelectedMember(''); }}
+          >
+            {projects.length === 0 && <option value="">{t('kanban.noProject')}</option>}
+            {projects.map((p) => (
+              <option key={p._id} value={p._id}>{p.name}</option>
+            ))}
+          </select>
+
+          {/* Member filter — PM / Admin only */}
+          {isPrivileged && (
+            <select
+              className="input w-40 text-sm"
+              value={selectedMember}
+              onChange={(e) => setSelectedMember(e.target.value)}
+            >
+              <option value="">All members</option>
+              {members.map((m) => (
+                <option key={m._id} value={m._id}>{m.name}</option>
+              ))}
+            </select>
+          )}
+
+          {/* New Task button */}
+          <button
+            className="btn-primary gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!selectedProject}
+            onClick={openNewTask}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+            </svg>
+            {t('kanban.createTask')}
+          </button>
+        </div>
+      </div>
+
+      {/* ── PM quick-stat strip ─────────────────────────────────────────────── */}
+      {isPrivileged && totalTasks > 0 && (
+        <div className="flex items-center gap-6 px-6 py-2.5 bg-white border-b border-gray-100 text-xs font-semibold text-gray-400 flex-shrink-0">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-gray-300" />
+            {totalTasks} total
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-primary-400" />
+            {inProgTasks} in progress
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-success" />
+            {doneTasks} done
+            {totalTasks > 0 && (
+              <span className="ml-0.5 text-success">({Math.round((doneTasks / totalTasks) * 100)}%)</span>
+            )}
+          </span>
+          {selectedMember && (
+            <span className="ml-auto flex items-center gap-1.5 text-primary-500">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+              </svg>
+              Filtered by member
+              <button onClick={() => setSelectedMember('')} className="hover:text-danger transition-colors">✕</button>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Empty state ─────────────────────────────────────────────────────── */}
+      {!selectedProject ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center text-gray-300">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-16 h-16 mx-auto mb-4 opacity-40" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+            </svg>
+            <p className="font-semibold text-sm text-gray-400">No project selected</p>
+            <p className="text-xs mt-1">Select a project to view its board</p>
+          </div>
+        </div>
+      ) : tasks.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-primary-300" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <p className="font-semibold text-gray-500 text-sm">
+              {isPrivileged ? 'No tasks in this project yet' : t('kanban.noTasks')}
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              {isPrivileged ? 'Create the first task to get started' : 'Create your first task below'}
+            </p>
+            <button onClick={openNewTask} className="btn-primary mt-4 text-sm">
+              + {t('kanban.createTask')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* ── Board ─────────────────────────────────────────────────────────── */
+        <div className="flex-1 overflow-x-auto p-6">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={collisionDetection}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="flex gap-4 h-full min-w-max">
+              {COLUMNS.map((status) => {
+                const columnTasks = getColumnTasks(status);
+                return (
+                  <KanbanColumn key={status} status={status} taskCount={columnTasks.length}>
+                    <SortableContext
+                      items={columnTasks.map((t) => t._id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {columnTasks.map((task) => (
+                        <TaskCard
+                          key={task._id}
+                          task={task}
+                          onClick={() => openEdit(task)}
+                          onEdit={() => openEdit(task)}
+                          onDelete={isPrivileged ? () => handleDelete(task) : undefined}
+                        />
+                      ))}
+                    </SortableContext>
+                  </KanbanColumn>
+                );
+              })}
+            </div>
+
+            <DragOverlay>
+              {activeTask ? (
+                <div className="bg-white border-2 border-primary-400 rounded-lg shadow-xl rotate-2 opacity-90 p-3">
+                  <p className="text-sm font-semibold text-gray-800 line-clamp-2">{activeTask.title}</p>
+                  {activeTask.description && (
+                    <p className="text-xs text-gray-400 mt-1 line-clamp-1">{activeTask.description}</p>
+                  )}
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        </div>
+      )}
+
+      {/* ── Task Modal ──────────────────────────────────────────────────────── */}
+      {showModal && (
+        <TaskModal
+          task={editTask}
+          projectId={selectedProject}
+          defaultAssigneeId={!isPrivileged ? currentUser?._id : undefined}
+          lockAssignee={!isPrivileged}
+          canDelete={isPrivileged}
+          onClose={() => setShowModal(false)}
+          onSave={fetchTasks}
+        />
+      )}
+    </div>
+  );
+}
