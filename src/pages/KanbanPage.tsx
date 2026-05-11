@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import api from '../lib/axios';
 import { useTaskStore } from '../stores/taskStore';
 import { useAuthStore } from '../stores/authStore';
+import { useKanbanFilterStore } from '../stores/kanbanFilterStore';
 import { Task, TaskStatus, Project, User, Team } from '../types';
 import TaskCard from '../components/TaskCard';
 import KanbanColumn from '../components/KanbanColumn';
@@ -33,12 +34,12 @@ export default function KanbanPage() {
   const isPrivileged = PRIVILEGED.includes(currentUser?.role ?? '');
   const isAdmin = currentUser?.role === 'Admin';
 
-  const [projects, setProjects]           = useState<Project[]>([]);
-  const [members, setMembers]             = useState<User[]>([]);
-  const [teams, setTeams]                 = useState<Team[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>('');
-  const [selectedMember, setSelectedMember]   = useState<string>('');
-  const [selectedTeam, setSelectedTeam]       = useState<string>('');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [members, setMembers]   = useState<User[]>([]);
+  const [teams, setTeams]       = useState<Team[]>([]);
+
+  const { selectedProject, selectedTeam, selectedMember,
+          setSelectedProject, setSelectedTeam, setSelectedMember } = useKanbanFilterStore();
   const [activeTask, setActiveTask]       = useState<Task | null>(null);
   const [showModal, setShowModal]         = useState(false);
   const [editTask, setEditTask]           = useState<Task | undefined>();
