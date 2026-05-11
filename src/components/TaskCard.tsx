@@ -1,7 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslation } from 'react-i18next';
-import { Task, TaskPriority, User } from '../types';
+import { Task, TaskPriority, User, Project } from '../types';
 
 const PRIORITY_STYLES: Record<TaskPriority, string> = {
   Low: 'bg-gray-100 text-gray-500',
@@ -20,12 +20,13 @@ const PRIORITY_DOT: Record<TaskPriority, string> = {
 interface Props {
   task: Task;
   isDragging?: boolean;
+  showProject?: boolean;
   onClick?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
 }
 
-export default function TaskCard({ task, isDragging = false, onClick, onEdit, onDelete }: Props) {
+export default function TaskCard({ task, isDragging = false, showProject = false, onClick, onEdit, onDelete }: Props) {
   const { t } = useTranslation();
   const {
     setNodeRef,
@@ -44,6 +45,11 @@ export default function TaskCard({ task, isDragging = false, onClick, onEdit, on
   const assignee =
     typeof task.assigneeId === 'object' && task.assigneeId
       ? (task.assigneeId as User)
+      : null;
+
+  const project =
+    showProject && typeof task.projectId === 'object' && task.projectId
+      ? (task.projectId as Project)
       : null;
 
   const formatDate = (d: string) =>
@@ -91,6 +97,16 @@ export default function TaskCard({ task, isDragging = false, onClick, onEdit, on
         className="px-3 pb-3 cursor-pointer"
         onClick={(e) => { e.stopPropagation(); onClick?.(); }}
       >
+        {/* Project badge (shown in All Projects view) */}
+        {project && (
+          <span className="inline-flex items-center gap-1 badge bg-primary-50 text-primary-700 text-[10px] font-semibold mb-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+            </svg>
+            {project.name}
+          </span>
+        )}
+
         {/* Title */}
         <p className="text-sm font-semibold text-gray-800 leading-snug line-clamp-2 mb-1">
           {task.title}
