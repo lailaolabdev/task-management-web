@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import pkg from '../../package.json';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../stores/authStore';
@@ -191,6 +192,7 @@ export default function Layout() {
 
         {/* Bottom — user profile */}
         <div className="p-4 mt-auto">
+          <p className="text-center text-[10px] text-primary-400/50 font-medium mb-2 tracking-wide">v{pkg.version}</p>
           <div className="flex items-center gap-3 bg-white/60 border border-primary-200/50 rounded-xl p-3 hover:bg-white/80 transition-colors cursor-default">
             <div className="relative flex-shrink-0">
               <div className="w-9 h-9 rounded-full bg-primary-600 flex items-center justify-center text-xs font-bold text-white shadow-sm">
