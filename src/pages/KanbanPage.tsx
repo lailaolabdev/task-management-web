@@ -390,7 +390,7 @@ export default function KanbanPage() {
           projectId={selectedProject}
           defaultAssigneeId={!isPrivileged ? currentUser?._id : undefined}
           lockAssignee={!isPrivileged}
-          canDelete={isPrivileged}
+          canDelete={canDelete}
           onClose={() => setShowModal(false)}
           onSave={fetchTasks}
         />

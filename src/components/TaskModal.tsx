@@ -95,7 +95,8 @@ export default function TaskModal({
       };
 
       if (isEdit) {
-        await api.patch(`/tasks/${task._id}`, payload);
+        const { projectId: _omit, ...updatePayload } = payload;
+        await api.patch(`/tasks/${task._id}`, updatePayload);
         toast.success(t('tasks.updatedSuccess'));
       } else {
         await api.post('/tasks', payload);
