@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next';
 import api from '../lib/axios';
 import { useTaskStore } from '../stores/taskStore';
 import { useAuthStore } from '../stores/authStore';
-import { useKanbanFilterStore } from '../stores/kanbanFilterStore';
+import { useKanbanFilterStore, resolveDateRange, type DatePreset } from '../stores/kanbanFilterStore';
 import { Task, TaskStatus, Project, User, Team } from '../types';
 import TaskCard from '../components/TaskCard';
 import KanbanColumn from '../components/KanbanColumn';
@@ -26,6 +26,7 @@ import TaskModal from '../components/TaskModal';
 
 const COLUMNS: TaskStatus[] = ['To Do', 'In Progress', 'Code Review', 'Testing', 'Done'];
 const PRIVILEGED = ['Admin', 'Project Manager'];
+const CAN_DELETE = ['Admin', 'Project Manager', 'Lead Team', 'Developer'];
 
 export default function KanbanPage() {
   const { t } = useTranslation();
@@ -33,13 +34,15 @@ export default function KanbanPage() {
   const currentUser = useAuthStore((s) => s.user);
   const isPrivileged = PRIVILEGED.includes(currentUser?.role ?? '');
   const isAdmin = currentUser?.role === 'Admin';
+  const canDelete = CAN_DELETE.includes(currentUser?.role ?? '');
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [members, setMembers]   = useState<User[]>([]);
   const [teams, setTeams]       = useState<Team[]>([]);
 
-  const { selectedProject, selectedTeam, selectedMember,
-          setSelectedProject, setSelectedTeam, setSelectedMember } = useKanbanFilterStore();
+  const { selectedProject, selectedTeam, selectedMember, datePreset, customStart, customEnd,
+          setSelectedProject, setSelectedTeam, setSelectedMember,
+          setDatePreset, setCustomRange } = useKanbanFilterStore();
   const [activeTask, setActiveTask]       = useState<Task | null>(null);
   const [showModal, setShowModal]         = useState(false);
   const [editTask, setEditTask]           = useState<Task | undefined>();
@@ -93,6 +96,9 @@ export default function KanbanPage() {
       if (selectedProject) params.set('projectId', selectedProject);
       if (isPrivileged && selectedMember) params.set('assigneeId', selectedMember);
       if (isAdmin && selectedTeam) params.set('teamId', selectedTeam);
+      const { startDate, endDate } = resolveDateRange(datePreset, customStart, customEnd);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
       const res = await api.get<{ data: { tasks: Task[] } }>(`/tasks?${params}`);
       setTasks(res.data.data?.tasks ?? []);
     } catch {
@@ -100,7 +106,7 @@ export default function KanbanPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProject, selectedMember, selectedTeam, isPrivileged, isAdmin, setTasks, setLoading]);
+  }, [selectedProject, selectedMember, selectedTeam, datePreset, customStart, customEnd, isPrivileged, isAdmin, setTasks, setLoading]);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
@@ -219,6 +225,38 @@ export default function KanbanPage() {
             </select>
           )}
 
+          {/* Date filter */}
+          <select
+            className="input w-36 text-sm"
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value as DatePreset)}
+          >
+            <option value="all">All Time</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="thisWeek">This Week</option>
+            <option value="thisMonth">This Month</option>
+            <option value="thisYear">This Year</option>
+            <option value="custom">Custom range…</option>
+          </select>
+
+          {datePreset === 'custom' && (
+            <>
+              <input
+                type="date"
+                className="input w-36 text-sm"
+                value={customStart}
+                onChange={(e) => setCustomRange(e.target.value, customEnd)}
+              />
+              <input
+                type="date"
+                className="input w-36 text-sm"
+                value={customEnd}
+                onChange={(e) => setCustomRange(customStart, e.target.value)}
+              />
+            </>
+          )}
+
           {/* New Task button */}
           <button
             className="btn-primary gap-1.5"
@@ -322,7 +360,7 @@ export default function KanbanPage() {
                           showProject={!selectedProject}
                           onClick={() => openEdit(task)}
                           onEdit={() => openEdit(task)}
-                          onDelete={isPrivileged ? () => handleDelete(task) : undefined}
+                          onDelete={canDelete ? () => handleDelete(task) : undefined}
                         />
                       ))}
                     </SortableContext>

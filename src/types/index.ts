@@ -202,6 +202,16 @@ export interface WorkloadItem {
   user: { name: string; email: string; department: string; role: string };
 }
 
+export interface TopPerformer {
+  userId: string;
+  name: string;
+  email: string;
+  department?: string;
+  role: string;
+  count: number;
+  storyPoints: number;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import api from '../lib/axios';
-import { DashboardMetrics, WorkloadItem, Standup, ProjectOverviewItem, PeakPeriod, ProjectPhase, TimelineStatus } from '../types';
+import { DashboardMetrics, WorkloadItem, Standup, ProjectOverviewItem, PeakPeriod, ProjectPhase, TimelineStatus, TopPerformer } from '../types';
 import { useAuthStore } from '../stores/authStore';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -195,30 +195,34 @@ export default function DashboardPage() {
   const [workload, setWorkload]             = useState<WorkloadItem[]>([]);
   const [peakPeriod, setPeakPeriod]         = useState<PeakPeriod | null>(null);
   const [blockers, setBlockers]             = useState<Standup[]>([]);
+  const [topPerformers, setTopPerformers]   = useState<TopPerformer[]>([]);
+  const [topPeriod, setTopPeriod]           = useState<'today' | 'week' | 'month'>('today');
   const [loading, setLoading]               = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [metricsRes, projectsRes, workloadRes, blockersRes] = await Promise.all([
+      const [metricsRes, projectsRes, workloadRes, blockersRes, topRes] = await Promise.all([
         api.get<{ data: { metrics: DashboardMetrics } }>(`/dashboard/metrics${memberParam}`),
         api.get<{ data: { projects: ProjectOverviewItem[] } }>(`/dashboard/projects${memberParam}`),
         api.get<{ data: { workload: WorkloadItem[]; peakPeriod: PeakPeriod | null } }>(`/dashboard/workload${memberParam}`),
         api.get<{ data: { blockers: Standup[] } }>('/dashboard/blockers'),
+        api.get<{ data: { performers: TopPerformer[] } }>(`/dashboard/top-performers?period=${topPeriod}`),
       ]);
       setMetrics(metricsRes.data.data?.metrics ?? null);
       setProjectOverview(projectsRes.data.data?.projects ?? []);
       setWorkload(workloadRes.data.data?.workload ?? []);
       setPeakPeriod(workloadRes.data.data?.peakPeriod ?? null);
       setBlockers(blockersRes.data.data?.blockers ?? []);
+      setTopPerformers(topRes.data.data?.performers ?? []);
     } catch {
       toast.error('Failed to load dashboard');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [memberParam, topPeriod]);
 
-  useEffect(() => { fetchData(); }, [fetchData, memberParam]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading) {
     return (
@@ -423,6 +427,59 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Top Performers (most Done tasks for the selected period) */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-sm font-bold text-gray-800">🏆 Top Performers</h2>
+            <p className="text-[11px] text-gray-400 mt-0.5 font-medium">Tasks completed (moved to Done) in this period</p>
+          </div>
+          <div className="inline-flex bg-gray-100 rounded-lg p-0.5">
+            {(['today', 'week', 'month'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setTopPeriod(p)}
+                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                  topPeriod === p ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {p === 'today' ? 'Today' : p === 'week' ? 'This Week' : 'This Month'}
+              </button>
+            ))}
+          </div>
+        </div>
+        {topPerformers.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-3xl mb-2">🌱</p>
+            <p className="text-sm text-gray-400 font-medium">No completed tasks yet for this period</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {topPerformers.map((p, i) => (
+              <div key={p.userId} className="flex items-center gap-3 p-3 bg-gradient-to-r from-primary-50/40 to-transparent border border-primary-100 rounded-xl">
+                <span className="text-lg w-6 text-center flex-shrink-0">
+                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                </span>
+                <div className="w-9 h-9 rounded-full bg-primary-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                  {p.name[0]?.toUpperCase() ?? '?'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                  <p className="text-[11px] text-gray-400 font-medium">{p.role}{p.department ? ` · ${p.department}` : ''}</p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-lg font-bold text-primary-700 leading-none">{p.count}</p>
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mt-1">
+                    task{p.count !== 1 ? 's' : ''}
+                    {p.storyPoints > 0 && ` · ${p.storyPoints} pts`}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Blocker Alerts */}

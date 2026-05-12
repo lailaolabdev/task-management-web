@@ -653,8 +653,8 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const canEdit = user?.role === 'Admin' || user?.role === 'Project Manager';
-  const canDelete = user?.role === 'Admin' || user?.role === 'Project Manager';
+  const canEdit = user?.role === 'Admin' || user?.role === 'Project Manager' || user?.role === 'Lead Team';
+  const canDelete = user?.role === 'Admin' || user?.role === 'Project Manager' || user?.role === 'Lead Team';
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);

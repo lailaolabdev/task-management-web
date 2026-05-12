@@ -194,6 +194,12 @@ export default function WeeklyReportPage() {
                 </div>
               </div>
 
+              {/* Auto-summary */}
+              <div className="px-4 py-2 bg-gradient-to-r from-primary-50/30 to-transparent border-t border-primary-50">
+                <p className="text-[11px] font-semibold text-primary-600 mb-0.5 tracking-wide uppercase">📝 Summary</p>
+                <p className="text-xs text-gray-600 leading-relaxed">{summarizeRow(row)}</p>
+              </div>
+
               {/* Projects + tasks */}
               {row.projects.map((p) => (
                 <div key={p.project._id} className="px-4 py-2 border-t border-gray-50">
@@ -213,6 +219,51 @@ export default function WeeklyReportPage() {
       )}
     </div>
   );
+}
+
+/**
+ * Template-based summary generator — produces a 1-2 sentence natural-language
+ * paragraph from a member's row, surfacing what they actually shipped this week.
+ */
+function summarizeRow(row: WeeklyReportRow): string {
+  const { totals, projects, user } = row;
+  if (totals.total === 0) return `${user.name} had no tasks in this period.`;
+
+  const rate = Math.round((totals.done / totals.total) * 100);
+  const allDone = projects.flatMap((p) => p.tasks).filter((t) => t.status === 'Done');
+  const topProject = [...projects].sort((a, b) => b.tasks.length - a.tasks.length)[0];
+  const topPriorityDone = allDone.filter((t) => t.priority === 'Critical' || t.priority === 'High').length;
+  const projectCount = projects.length;
+
+  const parts: string[] = [];
+
+  // Headline
+  parts.push(
+    `Completed ${totals.done} of ${totals.total} task${totals.total === 1 ? '' : 's'} ` +
+    `(${rate}% completion)${projectCount > 1 ? ` across ${projectCount} projects` : ''}.`
+  );
+
+  // What was shipped (up to 3 task titles)
+  if (allDone.length > 0) {
+    const sample = allDone.slice(0, 3).map((t) => `"${t.title}"`).join(', ');
+    const extra = allDone.length > 3 ? ` and ${allDone.length - 3} more` : '';
+    parts.push(`Shipped ${sample}${extra}.`);
+  }
+
+  // High-impact work
+  if (topPriorityDone > 0) {
+    parts.push(`${topPriorityDone} of those were high/critical priority.`);
+  }
+
+  // Active work + blockers
+  if (totals.inProgress > 0) {
+    parts.push(`${totals.inProgress} task${totals.inProgress === 1 ? ' is' : 's are'} still in progress${topProject ? ` (mostly on ${topProject.project.name})` : ''}.`);
+  }
+  if (totals.blocked > 0) {
+    parts.push(`⚠ ${totals.blocked} task${totals.blocked === 1 ? ' is' : 's are'} blocked and need attention.`);
+  }
+
+  return parts.join(' ');
 }
 
 function TaskRow({ task, t }: { task: Task; t: (k: string) => string }) {
